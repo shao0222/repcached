@@ -10,7 +10,7 @@ MAINTAINER wjw465150 <wjw465150@gmail.com>
 
 # Install dependence.
 RUN \
-  yum -y install unzip tar wget gcc make file automake autoconf libtool patch
+  yum -y install unzip tar wget gcc make file automake autoconf libtool patch nc
 
 #wget http://www.monkey.org/~provos/libevent-1.4.13-stable.tar.gz && \
 COPY ./libevent-1.4.13-stable.tar.gz /tmp/
