@@ -1,0 +1,122 @@
+diff --git a/items.c b/items.c
+index d8c8e77..5c0ac08 100644
+--- a/items.c
++++ b/items.c
+@@ -367,11 +367,12 @@ int do_item_replace(item *it, item *new_it, const uint32_t hv) {
+ }
+ 
+ /*@null@*/
+-char *do_item_cachedump(const unsigned int slabs_clsid, const unsigned int limit, unsigned int *bytes) {
++char *do_item_cachedump(const unsigned int slabs_clsid, const unsigned int start, const unsigned int limit, unsigned int *bytes) {
+     unsigned int memlimit = 2 * 1024 * 1024;   /* 2MB max response size */
+     char *buffer;
+     unsigned int bufcurr;
+     item *it;
++    int i;
+     unsigned int len;
+     unsigned int shown = 0;
+     char key_temp[KEY_MAX_LENGTH + 1];
+@@ -379,6 +380,12 @@ char *do_item_cachedump(const unsigned int slabs_clsid, const unsigned int limit
+ 
+     it = heads[slabs_clsid];
+ 
++    i = 0;
++    while (it!=NULL && i < start) {
++        it = it->next;
++        i++;
++    }
++
+     buffer = malloc((size_t)memlimit);
+     if (buffer == 0) return NULL;
+     bufcurr = 0;
+diff --git a/items.h b/items.h
+index 2ec142d..d29e574 100644
+--- a/items.h
++++ b/items.h
+@@ -14,7 +14,7 @@ void do_item_update(item *it);   /** update LRU time to current and reposition *
+ int  do_item_replace(item *it, item *new_it, const uint32_t hv);
+ 
+ /*@null@*/
+-char *do_item_cachedump(const unsigned int slabs_clsid, const unsigned int limit, unsigned int *bytes);
++char *do_item_cachedump(const unsigned int slabs_clsid, const unsigned int start, const unsigned int limit, unsigned int *bytes);
+ void do_item_stats(ADD_STAT add_stats, void *c);
+ /*@null@*/
+ void do_item_stats_sizes(ADD_STAT add_stats, void *c);
+diff --git a/memcached.c b/memcached.c
+index 2596c4e..3ecc647 100644
+--- a/memcached.c
++++ b/memcached.c
+@@ -2711,25 +2711,38 @@ static void process_stat(conn *c, token_t *tokens, const size_t ntokens) {
+         process_stat_settings(&append_stats, c);
+     } else if (strcmp(subcommand, "cachedump") == 0) {
+         char *buf;
+-        unsigned int bytes, id, limit = 0;
++        unsigned int bytes, id, limit = 0, start = 0;
+ 
+         if (ntokens < 5) {
+             out_string(c, "CLIENT_ERROR bad command line");
+             return;
+         }
+ 
+-        if (!safe_strtoul(tokens[2].value, &id) ||
+-            !safe_strtoul(tokens[3].value, &limit)) {
++        if (!safe_strtoul(tokens[2].value, &id)) {
+             out_string(c, "CLIENT_ERROR bad command line format");
+             return;
+         }
++        if (ntokens == 5) {
++            start = 0;
++            if (!safe_strtoul(tokens[3].value, &limit)) {
++                out_string(c, "CLIENT_ERROR bad command line format");
++                return;
++            }
++        }
++        else if (ntokens == 6) {
++            if (!safe_strtoul(tokens[3].value, &start) ||
++                !safe_strtoul(tokens[4].value, &limit)) {
++                out_string(c, "CLIENT_ERROR bad command line format");
++                return;
++            }
++        }
+ 
+         if (id >= POWER_LARGEST) {
+             out_string(c, "CLIENT_ERROR Illegal slab id");
+             return;
+         }
+ 
+-        buf = item_cachedump(id, limit, &bytes);
++        buf = item_cachedump(id, start, limit, &bytes);
+         write_and_free(c, buf, bytes);
+         return ;
+     } else {
+diff --git a/memcached.h b/memcached.h
+index e683474..0cbb8e0 100644
+--- a/memcached.h
++++ b/memcached.h
+@@ -539,7 +539,7 @@ conn *conn_from_freelist(void);
+ bool  conn_add_to_freelist(conn *c);
+ int   is_listen_thread(void);
+ item *item_alloc(char *key, size_t nkey, int flags, rel_time_t exptime, int nbytes);
+-char *item_cachedump(const unsigned int slabs_clsid, const unsigned int limit, unsigned int *bytes);
++char *item_cachedump(const unsigned int slabs_clsid, const unsigned int start, const unsigned int limit, unsigned int *bytes);
+ void  item_flush_expired(void);
+ item *item_get(const char *key, const size_t nkey);
+ item *item_touch(const char *key, const size_t nkey, uint32_t exptime);
+diff --git a/thread.c b/thread.c
+index a539dd6..21cd350 100644
+--- a/thread.c
++++ b/thread.c
+@@ -511,11 +511,11 @@ void item_flush_expired() {
+ /*
+  * Dumps part of the cache
+  */
+-char *item_cachedump(unsigned int slabs_clsid, unsigned int limit, unsigned int *bytes) {
++char *item_cachedump(unsigned int slabs_clsid, unsigned int start, unsigned int limit, unsigned int *bytes) {
+     char *ret;
+ 
+     mutex_lock(&cache_lock);
+-    ret = do_item_cachedump(slabs_clsid, limit, bytes);
++    ret = do_item_cachedump(slabs_clsid, start, limit, bytes);
+     pthread_mutex_unlock(&cache_lock);
+     return ret;
+ }
