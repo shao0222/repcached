@@ -1,5 +1,5 @@
 diff --git a/items.c b/items.c
-index d8c8e77..5c0ac08 100644
+index d8c8e77..447804d 100644
 --- a/items.c
 +++ b/items.c
 @@ -367,11 +367,12 @@ int do_item_replace(item *it, item *new_it, const uint32_t hv) {
@@ -29,6 +29,14 @@ index d8c8e77..5c0ac08 100644
      buffer = malloc((size_t)memlimit);
      if (buffer == 0) return NULL;
      bufcurr = 0;
+@@ -390,6 +397,7 @@ char *do_item_cachedump(const unsigned int slabs_clsid, const unsigned int limit
+         key_temp[it->nkey] = 0x00; /* terminate */
+         len = snprintf(temp, sizeof(temp), "ITEM %s [%d b; %lu s]\r\n",
+                        key_temp, it->nbytes - 2,
++                       it->exptime == 0 ? 0 :
+                        (unsigned long)it->exptime + process_started);
+         if (bufcurr + len + 6 > memlimit)  /* 6 is END\r\n\0 */
+             break;
 diff --git a/items.h b/items.h
 index 2ec142d..d29e574 100644
 --- a/items.h
@@ -43,7 +51,7 @@ index 2ec142d..d29e574 100644
  /*@null@*/
  void do_item_stats_sizes(ADD_STAT add_stats, void *c);
 diff --git a/memcached.c b/memcached.c
-index 2596c4e..3ecc647 100644
+index 2596c4e..bc61152 100644
 --- a/memcached.c
 +++ b/memcached.c
 @@ -2711,25 +2711,38 @@ static void process_stat(conn *c, token_t *tokens, const size_t ntokens) {
@@ -102,6 +110,52 @@ index e683474..0cbb8e0 100644
  void  item_flush_expired(void);
  item *item_get(const char *key, const size_t nkey);
  item *item_touch(const char *key, const size_t nkey, uint32_t exptime);
+diff --git a/scripts/memcached-tool b/scripts/memcached-tool
+index bae4efd..948cd85 100755
+--- a/scripts/memcached-tool
++++ b/scripts/memcached-tool
+@@ -79,15 +79,20 @@ if ($mode eq 'dump') {
+     print STDERR "  Number of items  : $totalitems\n";
+ 
+     foreach my $bucket (sort(keys(%items))) {
++        my $start=0;
+         print STDERR "Dumping bucket $bucket - " . $items{$bucket} . " total items\n";
+-        print $sock "stats cachedump $bucket $items{$bucket}\r\n";
+-        my %keyexp;
++
++        LOOP:
++        print STDERR "stats cachedump $bucket $start $items{$bucket}\n";
++        print $sock "stats cachedump $bucket $start $items{$bucket}\r\n";
++        my %keyexp = {};
+         while (<$sock>) {
+             last if /^END/;
+             # return format looks like this
+             # ITEM foo [6 b; 1176415152 s]
+             if (/^ITEM (\S+) \[.* (\d+) s\]/) {
+                 $keyexp{$1} = $2;
++                $start += 1;
+             }
+         }
+ 
+@@ -99,12 +104,17 @@ if ($mode eq 'dump') {
+                 my $len = $3;
+                 my $val;
+                 read $sock, $val, $len;
+-                print "add $k $flags $keyexp{$k} $len\r\n$val\r\n";
++                print "set $k $flags $keyexp{$k} $len\r\n$val\r\n";
+                 # get the END
+                 $_ = <$sock>;
+                 $_ = <$sock>;
+             }
++            else {
++                $start -= 1;
++                $items{$bucket} -=1;
++            }
+         }
++        goto LOOP if $start < $items{$bucket};
+     }
+     exit;
+ }
 diff --git a/thread.c b/thread.c
 index a539dd6..21cd350 100644
 --- a/thread.c

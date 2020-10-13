@@ -35,7 +35,8 @@ RUN cd /tmp/memcached-1.4.13-repcached-2.3.1 && \
  patch -p1 -i /tmp/memcached-1.4.13-cachedump-hack && \
  ./configure --with-libevent=/usr/local/lib/ --enable-replication --enable-64bit && \
  make && \
- make install
+ make install && \
+ cp scripts/memcached-tool /usr/bin/
 
 RUN ln -s /usr/local/lib/libevent-1.4.so.2 /usr/lib64/libevent-1.4.so.2 && \ 
  rm -rf /tmp/*
